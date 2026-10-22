@@ -1,0 +1,17 @@
+[project]
+name = "ape-streamlit-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Francesco Ortame", email = "109461666+liminalfever@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "ape",
+    "python-dotenv>=1.2.4",
+    "streamlit>=1.66.1",
+]
+
+[tool.uv.sources]
+ape = { git = "https://github.com/SapienzaNLP/APE.git" }
