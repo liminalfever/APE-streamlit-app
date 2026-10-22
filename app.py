@@ -122,7 +122,7 @@ with tab1:
 
     result = st.session_state.get("single_result")
     if result is not None:
-        col1, col2, col3 = st.columns([5,1,5])
+        col1, col2 = st.columns(2)
 
         with col1:
             st.subheader("Activity scores")
@@ -138,7 +138,7 @@ with tab1:
             )
             st.bar_chart(slot_df, horizontal=True, sort=False, y_label="Predicted activity level")
 
-        with col3:
+        with col2:
             st.subheader("Proposition Seeding")
             st.caption("Interpret embeddings by choosing a seed proposition and comparing it to the APE representation.")
             seed = st.text_input("Seed Proposition", key="seed").strip()
