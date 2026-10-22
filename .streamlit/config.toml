@@ -1,4 +1,5 @@
 [theme]
+font = "sans-serif"
 base="light"
 backgroundColor="#14371D"
 textColor="ghostWhite"
