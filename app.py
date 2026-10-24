@@ -12,7 +12,8 @@ from ape import APE, APEScore
 load_dotenv()
 
 MODEL_ID = "sapienzanlp/ape-bge-small"
-ACTIVITY_THRESHOLD = 0.6
+ACTIVITY_THRESHOLD = 0.6  # default activity level
+ACTIVITY_LEVELS = np.round(np.arange(0.00, 1.05, 0.05), 2)  # what the sliders allow: 0.05 ... 0.95
 IMAGE_PATH = Path(__file__).parent / "media" / "ape.png"
 LOGO_PATH = Path(__file__).parent / "media" / "sapienzanlp-transparent.png"
 
@@ -200,13 +201,83 @@ def n_active_text(n: int) -> str:
     return f"APE identified {n} active proposition{'' if n == 1 else 's'}."
 
 
-def activity_bar_chart(slot_scores: np.ndarray) -> None:
+def activity_bar_chart(slot_scores: np.ndarray, height: int | None = None) -> None:
     """One horizontal bar per slot, labeled `slot 0`, `slot 1`, ... in slot order."""
     slot_df = pd.DataFrame(
         {"activity": slot_scores},
         index=[slot_name(i) for i in range(len(slot_scores))],
     )
-    st.bar_chart(slot_df, horizontal=True, sort=False, y_label="Predicted activity level")
+    kwargs = {} if height is None else {"height": height}
+    st.bar_chart(slot_df, horizontal=True, sort=False, y_label="Predicted activity level", **kwargs)
+
+
+def activity_slider(key: str) -> float:
+    """Slider for the activity level above which a slot counts as an active proposition."""
+    level = st.slider(
+        "Activity level",
+        min_value=float(ACTIVITY_LEVELS[0]),
+        max_value=float(ACTIVITY_LEVELS[-1]),
+        value=ACTIVITY_THRESHOLD,
+        step=0.05,
+        key=key,
+        help="A slot is an active proposition when its activity score is above this level.",
+    )
+    return round(level, 2)
+
+
+@st.cache_data(show_spinner=False)
+def encode_at(sentences: tuple[str, ...], level: float) -> list[np.ndarray]:
+    """Proposition embeddings of each sentence at an activity level.
+
+    Cached per (sentences, level), so moving the slider back and forth never re-encodes.
+    """
+    return load_model().encode(
+        list(sentences), activity_threshold=level, convert_to_numpy=True
+    )
+
+
+def encode_active(
+    sentences: tuple[str, ...], slot_scores: np.ndarray, level: float
+) -> list[np.ndarray]:
+    """`encode_at`, plus a check that its output matches the slots derived from `slot_scores`.
+
+    `slot_scores` has one row per sentence ([n_sentences, num_slots]).
+    """
+    embds = encode_at(tuple(sentences), level)
+    for scores, e in zip(slot_scores, embds):
+        assert len(active_slot_indices(scores, level)) == len(e), (
+            "Active slots do not match the encoded propositions"
+        )
+    return embds
+
+
+def active_propositions_chart(slot_scores: np.ndarray, level: float, height: int = 220) -> alt.LayerChart:
+    """Number of active propositions at every activity level the slider allows.
+
+    The selected level is marked with a dashed vertical line and a larger point.
+    """
+    counts = [len(active_slot_indices(slot_scores, t)) for t in ACTIVITY_LEVELS]
+    df = pd.DataFrame({"level": ACTIVITY_LEVELS, "active": counts})
+    selected = df[np.isclose(df["level"], level)]
+
+    x = alt.X("level:Q", title="Activity level", scale=alt.Scale(domain=[0, 1]))
+    y = alt.Y(
+        "active:Q",
+        title="Active propositions",
+        scale=alt.Scale(domain=[0, len(slot_scores)]),  # at most one proposition per slot
+        axis=alt.Axis(tickMinStep=1),
+    )
+    tooltip = [
+        alt.Tooltip("level:Q", title="Activity level", format=".2f"),
+        alt.Tooltip("active:Q", title="Active propositions"),
+    ]
+
+    line = alt.Chart(df).mark_line(point=True).encode(x=x, y=y, tooltip=tooltip)
+    marker = alt.Chart(selected).mark_point(filled=True, size=140).encode(x=x, y=y, tooltip=tooltip)
+    rule = alt.Chart(selected).mark_rule(strokeDash=[4, 4], color="gray").encode(x=x)
+    return (line + rule + marker).properties(
+        height=height, title="Active propositions by activity level"
+    )
 
 
 def matched_indices(seed_embds, prop_embds) -> np.ndarray:
@@ -247,89 +318,9 @@ st.html("""
 
 st.image(str(IMAGE_PATH))
 
-tab1, tab2 = st.tabs(["Single sentence", "Comparison"])
+tab1, tab2 = st.tabs(["Comparison", "Single sentence"])
 
 with tab1:
-    col1, col2 = st.columns([4,1], vertical_alignment="center")
-
-    with col1:
-        st.text_area(
-            "Sentence",
-            value="Rome was founded in 753 BC and is now the capital of Italy and its largest city.",
-            key="sent",
-            height=68
-        )
-
-    with col2:
-        if st.button("Encode", icon="🦧", use_container_width=True):
-            sentence = st.session_state.sent.strip()
-            if not sentence:
-                st.session_state.pop("single_result", None)
-                st.warning("Please enter a sentence.")
-            else:
-                with st.spinner("Encoding"):
-                    prop_embds, act_scores = model.encode(
-                        sentence,
-                        activity_threshold=ACTIVITY_THRESHOLD,
-                        return_scores=True,
-                    )
-                    slot_scores = model.activity_scores([sentence])[0]  # [num_slots]
-
-                # Sanity check: the slots we derive from `slot_scores` (see `active_slot_indices`)
-                # must be exactly the ones `encode` returned embeddings for.
-                assert len(active_slot_indices(slot_scores, ACTIVITY_THRESHOLD)) == len(prop_embds), (
-                    "Active slots do not match the encoded propositions"
-                )
-
-                # Persist the results: widget interactions rerun the script, and the
-                # button is only True on the run right after the click.
-                st.session_state.single_result = {
-                    "sentence": sentence,
-                    "n_props": len(prop_embds),
-                    "prop_embds": prop_embds,  # [n_props, D], one row per active slot
-                    "act_scores": act_scores,
-                    "slot_scores": slot_scores,
-                }
-
-    result = st.session_state.get("single_result")
-    if result is not None:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("Activity Scores")
-            st.caption("These scores determine the predicted activity level of each proposition embedding.")
-
-            st.text(n_active_text(result["n_props"]))
-            activity_bar_chart(result["slot_scores"])
-
-        with col2:
-            st.subheader("Proposition Seeding")
-            st.caption("Interpret embeddings by choosing a seed proposition and comparing it to the APE representation.")
-            seed = st.text_input("Seed Proposition", key="seed", value="Rome was built in 753 BC.").strip()
-
-            if seed:
-                # Rows: the seed's embedding(s). Columns: the source sentence's active
-                # proposition embeddings. Both come from the same encoder, so cosine
-                # similarity is directly comparable.
-                seed_embds = model.encode(seed, activity_threshold=ACTIVITY_THRESHOLD)
-                sim = APEScore(seed_embds, result["prop_embds"]).similarity_matrix()
-
-                n_seed = len(seed_embds)
-                if n_seed > 1:
-                    st.caption(
-                        f"APE split this seed into {n_seed} propositions. "
-                        "Seeds work best when they are a single atomic proposition."
-                    )
-
-                row_labels = ["Seed"] if n_seed == 1 else [f"Seed {i}" for i in range(n_seed)]
-                active_slots = active_slot_indices(result["slot_scores"], ACTIVITY_THRESHOLD)
-                col_labels = [slot_name(i) for i in active_slots]
-                st.caption("Cosine similarity scores.")
-                show_heatmap(
-                    similarity_heatmap(sim, row_labels, col_labels, max_plot_width=260)
-                )
-
-with tab2:
     col1, col2, col3 = st.columns([2, 2, 1], vertical_alignment="bottom")
 
     with col1:
@@ -392,11 +383,17 @@ with tab2:
             st.subheader("Activity Scores")
             st.caption("These scores determine the predicted activity level for each proposition embedding.")
 
+            compare_level = activity_slider("compare_level")
+            # Embeddings of the propositions that are active at the chosen level.
+            active_embds = encode_active(
+                comparison["sentences"], comparison["slot_scores"], compare_level
+            )
+
             col1, col2 = st.columns(2, vertical_alignment="bottom")
             for col, name, embds, scores in zip(
                 (col1, col2),
                 ("Sentence A", "Sentence B"),
-                comparison["prop_embds"],
+                active_embds,
                 comparison["slot_scores"],
             ):
                 with col:
@@ -411,9 +408,9 @@ with tab2:
 
                 # Rows: sentence A's active propositions. Columns: sentence B's. Each one is
                 # labeled with the slot it comes from, so it can be matched to the charts above.
-                emb_a, emb_b = comparison["prop_embds"]
+                emb_a, emb_b = active_embds
                 slots_a, slots_b = (
-                    active_slot_indices(scores, ACTIVITY_THRESHOLD)
+                    active_slot_indices(scores, compare_level)
                     for scores in comparison["slot_scores"]
                 )
                 scorer = APEScore(emb_a, emb_b)  # rows: A, columns: B (A = hypothesis if asymmetric)
@@ -488,3 +485,100 @@ with tab2:
                         "each one highlights its best match. Seeds work best when they are "
                         "a single atomic proposition."
                     )
+
+with tab2:
+    col1, col2 = st.columns([4,1], vertical_alignment="center")
+
+    with col1:
+        st.text_area(
+            "Sentence",
+            value="Rome was founded in 753 BC and is now the capital of Italy and its largest city.",
+            key="sent",
+            height=68
+        )
+
+    with col2:
+        if st.button("Encode", icon="🦧", use_container_width=True):
+            sentence = st.session_state.sent.strip()
+            if not sentence:
+                st.session_state.pop("single_result", None)
+                st.warning("Please enter a sentence.")
+            else:
+                with st.spinner("Encoding"):
+                    prop_embds, act_scores = model.encode(
+                        sentence,
+                        activity_threshold=ACTIVITY_THRESHOLD,
+                        return_scores=True,
+                    )
+                    slot_scores = model.activity_scores([sentence])[0]  # [num_slots]
+
+                # Sanity check: the slots we derive from `slot_scores` (see `active_slot_indices`)
+                # must be exactly the ones `encode` returned embeddings for.
+                assert len(active_slot_indices(slot_scores, ACTIVITY_THRESHOLD)) == len(prop_embds), (
+                    "Active slots do not match the encoded propositions"
+                )
+
+                # Persist the results: widget interactions rerun the script, and the
+                # button is only True on the run right after the click.
+                st.session_state.single_result = {
+                    "sentence": sentence,
+                    "n_props": len(prop_embds),
+                    "prop_embds": prop_embds,  # [n_props, D], one row per active slot
+                    "act_scores": act_scores,
+                    "slot_scores": slot_scores,
+                }
+
+        result = st.session_state.get("single_result")
+    if result is not None:
+
+        with st.expander("Activity scores", expanded=True):
+            st.subheader("Activity Scores")
+            st.caption("These scores determine the predicted activity level of each proposition embedding.")
+
+            col1, col2 = st.columns(2)
+
+            # The line plot (left) marks the selected level, so the slider (right) has to run
+            # first. Streamlit lets you fill columns in any order; the layout stays the same.
+            BAR_HEIGHT = 300  # tune to taste
+
+            with col2:
+                single_level = activity_slider("single_level")
+                active_embds = encode_active(
+                    (result["sentence"],), result["slot_scores"][None], single_level
+                )[0]
+                activity_bar_chart(result["slot_scores"], height=BAR_HEIGHT - 84)
+
+            with col1:
+                st.altair_chart(
+                    # The right column also holds the slider and the text above its chart, so the
+                    # plot area is a bit shorter than the bar chart to end at the same level.
+                    active_propositions_chart(result["slot_scores"], single_level, height=BAR_HEIGHT),
+                    width="stretch",
+                )
+
+        with st.expander("Proposition seeding", expanded=True):
+            st.subheader("Proposition Seeding")
+            st.caption("Interpret embeddings by choosing a seed proposition and comparing it to the APE representation.")
+            seed = st.text_input("Seed Proposition", key="seed", value="Rome was built in 753 BC.").strip()
+
+            if seed:
+                # Rows: the seed's embedding(s). Columns: the source sentence's active
+                # proposition embeddings. Both come from the same encoder, so cosine
+                # similarity is directly comparable.
+                seed_embds = model.encode(seed, activity_threshold=ACTIVITY_THRESHOLD)
+                sim = APEScore(seed_embds, active_embds).similarity_matrix()
+
+                n_seed = len(seed_embds)
+                if n_seed > 1:
+                    st.caption(
+                        f"APE split this seed into {n_seed} propositions. "
+                        "Seeds work best when they are a single atomic proposition."
+                    )
+
+                row_labels = ["Seed"] if n_seed == 1 else [f"Seed {i}" for i in range(n_seed)]
+                active_slots = active_slot_indices(result["slot_scores"], single_level)
+                col_labels = [slot_name(i) for i in active_slots]
+                st.caption("Cosine similarity between the atomic proposition embedding(s) and the source sentence embeddings.")
+                show_heatmap(
+                    similarity_heatmap(sim, row_labels, col_labels, max_plot_width=560)
+                )
