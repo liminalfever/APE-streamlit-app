@@ -255,7 +255,7 @@ with tab1:
     with col1:
         st.text_area(
             "Sentence",
-            value="Rome was built in 753 BC and is now the capital of Italy, while Paris is a big city indeed, Bangkok is crowded and New York is very busy.",
+            value="Rome was founded in 753 BC and is now the capital of Italy and its largest city.",
             key="sent",
             height=68
         )
@@ -305,7 +305,7 @@ with tab1:
         with col2:
             st.subheader("Proposition Seeding")
             st.caption("Interpret embeddings by choosing a seed proposition and comparing it to the APE representation.")
-            seed = st.text_input("Seed Proposition", key="seed").strip()
+            seed = st.text_input("Seed Proposition", key="seed", value="Rome was built in 753 BC.").strip()
 
             if seed:
                 # Rows: the seed's embedding(s). Columns: the source sentence's active
@@ -335,14 +335,14 @@ with tab2:
     with col1:
         st.text_input(
             "Sentence A",
-            value="Rome was built in 753 BC and is now the capital of Italy.",
+            value="The city of Paris is more than 2000 years old, and Rome was built in 753 BC.",
             key="sent_a",
         )
 
     with col2:
         st.text_input(
             "Sentence B",
-            value="Paris is a beautiful city and Rome was built in 753 BC.",
+            value="Rome was founded in 753 BC and is now the capital of Italy and its largest city.",
             key="sent_b",
         )
 
@@ -472,7 +472,7 @@ with tab2:
             with col1:
                 st.text_input("Seed proposition for Sentence A", key="seed_a")
             with col2:
-                st.text_input("Seed proposition for Sentence B", key="seed_b")
+                st.text_input("Seed proposition for Sentence B", key="seed_b", value="Rome was built in 753 BC.")
             with col3:
                 st.button(
                     "Seed",
