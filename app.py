@@ -11,7 +11,7 @@ from ape import APE, APEScore
 
 load_dotenv()
 
-MODEL_ID = "francescoortame/ape-bge-small"
+MODEL_ID = "sapienzanlp/ape-bge-small"
 ACTIVITY_THRESHOLD = 0.6
 IMAGE_PATH = Path(__file__).parent / "media" / "ape.png"
 LOGO_PATH = Path(__file__).parent / "media" / "sapienzanlp-transparent.png"
@@ -296,7 +296,7 @@ with tab1:
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("Activity scores")
+            st.subheader("Activity Scores")
             st.caption("These scores determine the predicted activity level of each proposition embedding.")
 
             st.text(n_active_text(result["n_props"]))
@@ -389,7 +389,7 @@ with tab2:
     # until the next click on "Compare".
     if comparison is not None and "slot_scores" in comparison:
         with st.expander("Activity scores"):
-            st.subheader("Activity scores")
+            st.subheader("Activity Scores")
             st.caption("These scores determine the predicted activity level for each proposition embedding.")
 
             col1, col2 = st.columns(2, vertical_alignment="bottom")
